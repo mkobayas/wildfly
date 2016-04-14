@@ -181,6 +181,8 @@ public class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHan
 
                 @Override
                 public void run() {
+                    boolean isAsyncVoid = false;
+                    
                     // check if it's async. If yes, then notify the client that's it's async method (so that
                     // it can unblock if necessary)
                     if (componentView.isAsynchronous(invokedMethod)) {
@@ -191,6 +193,7 @@ public class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHan
                             // failed to send a notification to the client that the method is an async method
                             EjbLogger.REMOTE_LOGGER.failedToSendAsyncMethodIndicatorToClient(t, invokedMethod);
                         }
+                        isAsyncVoid = invokedMethod.getReturnType().equals(Void.TYPE);
                     }
 
                     // invoke the method
@@ -198,7 +201,16 @@ public class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHan
                     SecurityActions.remotingContextSetConnection(channelAssociation.getChannel().getConnection());
                     try {
                         result = invokeMethod(invocationId, componentView, invokedMethod, methodParams, locator, attachments);
+                        if(isAsyncVoid){
+                            // OneWay
+                            //  No more message
+                            return;
+                        }
                     } catch (Throwable throwable) {
+                        if(isAsyncVoid){
+                            EjbLogger.ROOT_LOGGER.errorInvokingMethod(throwable, invokedMethod, beanName, appName, moduleName, distinctName);
+                            return;
+                        }
                         try {
                             // if the EJB is shutting down when the invocation was done, then it's as good as the EJB not being available. The client has to know about this as
                             // a "no such EJB" failure so that it can retry the invocation on a different node if possible.
@@ -245,7 +257,6 @@ public class MethodInvocationMessageHandler extends EJBIdentifierBasedMessageHan
                         }
                         writeMethodInvocationResponse(channelAssociation, invocationId, result, attachments, invokedMethod, componentView);
                     } catch (Throwable ioe) {
-                        boolean isAsyncVoid = componentView.isAsynchronous(invokedMethod) && invokedMethod.getReturnType().equals(Void.TYPE);
                         if (!isAsyncVoid)
                             EjbLogger.REMOTE_LOGGER.couldNotWriteMethodInvocation(ioe, invokedMethod, beanName, appName, moduleName, distinctName);
                         return;
